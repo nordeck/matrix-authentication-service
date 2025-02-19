@@ -1,6 +1,6 @@
 http:
   # Public URL base used when building absolute public URLs
-  public_base: "{{ .Values.config.http.public_base -}}/"
+  public_base: "{{ required "you need to set a URL for .Values.config.http.public_base" .Values.config.http.public_base -}}/"
 
   # OIDC issuer advertised by the service. Defaults to `public_base`
   issuer: {{ .Values.config.http.issuer | default .Values.config.http.public_base | quote }}
@@ -83,7 +83,7 @@ clients:
     client_auth_method: {{ .Values.clients.client_auth_method }}
     client_secret: {{ .Values.clients.client_secret }}
     # List of authorized redirect URIs
-    redirect_uris: {{ .Values.clients.redirect_uris}}
+    redirect_uris: {{ .Values.clients.redirect_uris | toYaml | nindent 6 }}
   # Public client
   - client_id: {{ .Values.clients.pub_id }}
     client_auth_method: {{ .Values.clients.pubAuthMethod }}
@@ -119,27 +119,75 @@ passwords:
     - version: {{ .version }}
       algorithm: {{ .algorithm }}
 {{- end}}
+
+account:
+  email_change_allowed: {{ .Values.account.email_change_allowed | default "true" }}
+  displayname_change_allowed: {{ .Values.account.displayname_change_allowed | default "true" }}
+  password_registration_enabled: {{ .Values.account.password_registration_enabled | default "false" }}
+  password_change_allowed: {{ .Values.account.password_change_allowed | default "true" }}
+  password_recovery_enabled: {{ .Values.account.password_recovery_enabled | default "false" }}
+
 policy:
   data:
-    admin_users: {{ .Values.policy.data.admins }}
-
+    {{- if .Values.policy.data.hasAdminUsers }}
+    {{ with .Values.policy.data.admins }}
+    admin_users:
+      {{-  . | toYaml | nindent 6 }}
+    {{- end }}
+    # Client IDs which are allowed to ask for admin access with a
+    # client_credentials grant
+    {{- with .Values.policy.data.admin_clients }}
+    admin_clients:
+      {{- . | toYaml | nindent 6 }}
+    {{- end }}
+    {{- end }}
     # Dynamic Client Registration
     client_registration:
       # don't require URIs to be on the same host. default: false
       allow_host_mismatch: {{ .Values.policy.data.clientHostMismatch | default "false" }}
       # allow non-SSL and localhost URIs. default: false
       allow_insecure_uris: {{ .Values.policy.data.clientNoSsl | default "false" }}
+      # don't require clients to provide a client_uri. default: false
+      allow_missing_client_uri: {{ .Values.policy.data.clientMissingUri | default "false" }}
+      # don't require clients to provide a contacts field. default: false
+      allow_missing_contacts: {{ .Values.policy.data.missingContacts | default "false" }}
 
     # Registration using passwords
     passwords:
       # minimum length of a password. default: ?
       min_length: {{ .Values.policy.data.pass.minLength }}
       # require at least one lowercase character in a password. default: false
-      require_lowercase: {{ .Values.policy.data.pass.reqLowCase }}
+      require_lowercase: {{ .Values.policy.data.pass.reqLowCase | default "false" }}
       # require at least one uppercase character in a password. default: false
-      require_uppercase: {{ .Values.policy.data.pass.reqUpCase }}
+      require_uppercase: {{ .Values.policy.data.pass.reqUpCase | default "false" }}
       # require at least one number in a password. default: false
-      require_number: {{ .Values.policy.data.pass.reqNum }}
+      require_number: {{ .Values.policy.data.pass.reqNum | default "false" }}
+
+rate_limiting:
+  {{- with .Values.rate_limiting.account_recovery }}
+  account_recovery:
+    per_ip:
+      burst: {{ .ip.burst }}
+      per_second: {{ .ip.second }}
+    per_address:
+      burst: {{ .address.burst }}
+      per_second: {{ .address.second }}
+  {{- end }}
+  {{- with .Values.rate_limiting.login }}
+  login:
+    per_ip:
+      burst: {{ .ip.burst }}
+      per_second: {{ .ip.second }}
+    per_account:
+      burst: {{ .account.burst }}
+      per_second: {{ .account.second }}
+   {{- end }}
+  {{- with .Values.rate_limiting.registration }}
+  registration:
+    burst: {{ .burst }}
+    per_second: {{ .second }}
+  {{- end }}
+
 {{- if .Values.telemetry.enabled }}
 telemetry:
   tracing:
@@ -165,117 +213,106 @@ telemetry:
 email:
   from: {{ .Values.email.from | squote }}
   reply_to: {{ .Values.email.reply2 | squote }}
-  transport: {{ .Values.email.transport }}
-{{- if .Values.email.enabled }}
-  hostanme: {{ .Values.email.hostname }}
+  transport: {{ .Values.email.transport | default "blackhole" }}
+{{- if eq .Values.email.transport "smtp" }}
+  hostname: {{ .Values.email.hostname }}
   mode: {{ .Values.email.mode }}
   port: {{ .Values.email.port }}
   username: {{ .Values.email.username }}
   password: {{ .Values.email.password }}
 {{- end }}
+{{- if eq .Values.email.transport "sendmail" }}
+  command: {{ .Values.email.command }}
+{{- end }}
 
+{{- if .Values.upstream_oauth2.enabled | default false }}
   # Sample configurations for popular providers can be found in the upstream provider setup guide.
-  # https://matrix-org.github.io/matrix-authentication-service/setup/sso.html#sample-configurations
+  # https://element-hq.github.io/matrix-authentication-service/setup/sso.html
 upstream_oauth2:
-  providers: []
-  {{- if .Values.upstream_oauth2.enabled }}
-    - id: {{ .Values.upstream_oauth2.providerId }}
-
-      # The issuer URL, which will be used to discover the provider's configuration.
-      # If discovery is enabled, this *must* exactly match the `issuer` field
-      # advertised in `<issuer>/.well-known/openid-configuration`.
-      issuer: {{ .Values.upstream_oauth2.issuerUrl }}
-
-      human_name: {{ .Values.upstream_oauth2.humanName }}
-
-      # A brand identifier for the provider, which will be used to display a logo
-      # on the login page. Values supported by the default template are:
-      #  - `apple`
-      #  - `google`
-      #  - `facebook`
-      #  - `github`
-      #  - `gitlab`
-      #  - `twitter`
-      brand_name: {{ .Values.upstream_oauth2.brand }}
-
-      # The client ID to use to authenticate to the provider
-      client_id: {{ .Values.upstream_oauth2.clientId }}
-
-      # The client secret to use to authenticate to the provider
-      # This is only used by the `client_secret_post`, `client_secret_basic`
-      # and `client_secret_jwk` authentication methods
-      client_secret: {{ .Values.upstream_oauth2.client_secret }}
-
-      # Which authentication method to use to authenticate to the provider
-      # Supported methods are:
-      #   - `none`
-      #   - `client_secret_basic`
-      #   - `client_secret_post`
-      #   - `client_secret_jwt`
-      #   - `private_key_jwt` (using the keys defined in the `secrets.keys` section)
-      token_endpoint_auth_method: {{ .Values.upstream_oauth2.endpointAuth }}
-      {{- if .Values.upstream_oauth2.endpoint.useJwt }}
-      token_endpoint_auth_signing_alg: {{ .Values.upstream_oauth2.endpointAuthSignAlg }}
+  providers:
+  {{- range .Values.upstream_oauth2.providers }}
+    {{- if .id }}
+    - id: {{ .id | quote }}
+      {{- if .client_id }}
+      client_id: {{ .client_id | quote }}
       {{- end }}
-      # The scopes to request from the provider
-      # In most cases, it should always include `openid` scope
-      scope: {{ .Values.upstream_oauth2.scope }}
-
-      # How the provider configuration and endpoints should be discovered
-      # Possible values are:
-      #  - `oidc`: discover the provider through OIDC discovery,
-      #     with strict metadata validation (default)
-      #  - `insecure`: discover through OIDC discovery, but skip metadata validation
-      #  - `disabled`: don't discover the provider and use the endpoints below
-      discovery_mode: {{ .Values.upstream_oauth2.discovery_mode }}
-
-      # Whether PKCE should be used during the authorization code flow.
-      # Possible values are:
-      #  - `auto`: use PKCE if the provider supports it (default)
-      #    Determined through discovery, and disabled if discovery is disabled
-      #  - `always`: always use PKCE (with the S256 method)
-      #  - `never`: never use PKCE
-      pkce_method: {{ .Values.upstream_oauth2.pkce }}
-
-      # The provider authorization endpoint
-      # This takes precedence over the discovery mechanism
-      authorization_endpoint: {{ .Values.upstream_oauth2.authorization_endpoint }}
-
-      # The provider token endpoint
-      # This takes precedence over the discovery mechanism
-      token_endpoint: {{ .Values.upstream_oauth2.token_endpoint }}
-
-      # The provider JWKS URI
-      # This takes precedence over the discovery mechanism
-      jwks_uri: {{ .Values.upstream_oauth2.jwks_uri }}
-
+    {{- else if .client_id }}
+    - client_id: {{ .client_id | quote }}
+    {{- end }}
+      {{- if .human_name }}
+      human_name: {{ .human_name }}
+      {{- end }}
+      {{- if .brand_name }}
+      brand_name: {{ .brand_name }}
+      {{- end }}
+      {{- if .discovery_uri }}
+      discovery_mode: {{ .discovery_mode }}
+      {{- end }}
+      {{- if .fetch_userinfo }}
+      fetch_userinfo: {{ .fetch_userinfo }}
+      {{- end }}
+      {{- if .token_endpoint_auth_method }}
+      token_endpoint_auth_method: {{ .token_endpoint_auth_method | quote }}
+      {{- end }}
+      {{- if .sign_in_with_apple }}
+      sign_in_with_apple:
+        private_key: |
+        {{- with .sign_in_with_apple.private_key }}
+          {{ . | indent 12 | trim }}
+        {{- end }}
+        team_id: {{ .sign_in_with_apple.team_id | quote }}
+        key_id: {{ .sign_in_with_apple.key_id | quote }}
+      {{- end }}
+      {{- if .client_secret }}
+      client_secret: {{ .client_secret | quote }}
+      {{- end }}
+      {{- if .authorization_endpoint }}
+      authorization_endpoint: {{ .authorization_endpoint | quote }}
+      {{- end }}
+      {{- if .token_endpoint }}
+      token_endpoint: {{ .token_endpoint | quote }}
+      {{- end }}
+      {{- if .userinfo_endpoint }}
+      userinfo_endpoint: {{ .userinfo_endpoint | quote }}
+      {{- end }}
+      scope: {{ .scope | quote }}
+      {{- if .response_mode }}
+      response_mode: {{ .response_mode | quote }}
+      {{- end }}
+      {{- if .discovery_mode}}
+      discovery_mode: {{ .discovery_mode | quote }}
+      {{- end }}
       claims_imports:
+        {{- if .claims_imports.subject }}
         subject:
-          {{- with .Values.upstream_oauth2.claims_imports.subject.template }}
-          template: {{ . | quote }}
-          {{- end }}
-        localpart:
-          {{- with .Values.upstream_oauth2.claims_imports.localpart.action }}
-          action: {{ . }}
-          {{- end }}
-          {{- with .Values.upstream_oauth2.claims_imports.localpart.template }}
-          template: {{ . | quote }}
-          {{- end }}
+          template: {{ .claims_imports.subject.template | quote }}
+        {{- end }}
+        {{- if .claims_imports.displayname }}
         displayname:
-          {{- with .Values.upstream_oauth2.claims_imports.displayname.action }}
-          action: {{ . }}
-          {{- end }}
-          {{- with .Values.upstream_oauth2.claims_imports.displayname.template }}
-          template: {{ . | quote }}
-          {{- end }}
+          action: {{ .claims_imports.displayname.action }}
+          template: {{ .claims_imports.displayname.template | quote }}
+        {{- end }}
+        {{- if .claims_imports.localpart }}
+        localpart:
+          action: {{ .claims_imports.localpart.action }}
+        {{- end }}
+        {{- if .claims_imports.email }}
         email:
-          {{- with .Values.upstream_oauth2.claims_imports.email.action }}
-          action: {{ . }}
+          action: {{ .claims_imports.email.action }}
+          template: {{ .claims_imports.email.template | quote }}
+          {{- if .claims_imports.email.set_email_verification }}
+          set_email_verification: {{ .claims_imports.email.set_email_verification | quote }}
           {{- end }}
-          {{- with .Values.upstream_oauth2.claims_imports.email.template }}
-          template: {{ . | quote }}
-          {{- end }}
-          {{- with .Values.upstream_oauth2.claims_imports.email.set_email_verification }}
-          set_email_verification: {{ . }}
-          {{- end }}
+        {{- end }}
+        {{- if .claims_imports.account_name }}
+        account_name:
+          template: {{ .claims_imports.account_name.template | quote }}
+        {{- end }}
+      {{- if .issuer }}
+      issuer: {{ .issuer | quote }}
+      {{- end }}
+      {{- if .jwks_uri }}
+      jwks_uri: {{ .jwks_uri | quote }}
+      {{- end }}
   {{- end }}
+{{- end }}

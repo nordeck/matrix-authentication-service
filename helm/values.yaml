@@ -5,10 +5,10 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/matrix-org/matrix-authentication-service
+  repository: ghcr.io/element-hq/matrix-authentication-service
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "0.9.0"
+  tag: "0.13.0"
   # debug images are available with have a shell use $imageTag-debug
   # the debug version has the mas-cli in /usr/local/bin
   # the command `mas-cli doctor` can test some functionality
@@ -54,14 +54,14 @@ ingress:
     # kubernetes.io/tls-acme: "true"
     # nginx.ingress.kubernetes.io/use-regex: "true"
   hosts:
-    - host: auth.example.com
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-    - host: synapse.example.com
-      paths:
-        - path: /_matrix/client/(.*)/(login|logout|refresh)
-          pathType: ImplementationSpecific
+    #- host: auth.example.com
+    #  paths:
+    #    - path: /
+    #      pathType: ImplementationSpecific
+    #- host: synapse.example.com
+    #  paths:
+    #    - path: /_matrix/client/(.*)/(login|logout|refresh)
+    #      pathType: ImplementationSpecific
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
@@ -126,6 +126,7 @@ affinity: {}
 config:
   http:
     # MAS URL
+    # dont add trailing slash
     public_base: https://auth.example.com
     # OIDC issuer advertised by the service. Defaults to `public_base`
     issuer:
@@ -142,6 +143,8 @@ config:
 
   proxy_protocol: false
   trusted_proxies:
+  - 192.168.0.0/16
+  - 172.16.0.0/12
   - 10.0.0.0/10
   - 127.0.0.1/8
   - fd00::/8
@@ -199,20 +202,101 @@ passwords:
     - version: 1
       algorithm: bcrypt
 
+account:
+  # Whether users are allowed to change their email addresses.
+  #
+  # Defaults to `true`.
+  email_change_allowed: true
+  # Whether users are allowed to change their display names
+  #
+  # Defaults to `true`.
+  # This should be in sync with the policy in the homeserver configuration.
+  displayname_change_allowed: true
+  # Whether to enable self-service password registration
+  #
+  # Defaults to `false`.
+  # This has no effect if password login is disabled.
+  password_registration_enabled: false
+  # Whether users are allowed to change their passwords
+  #
+  # Defaults to `true`.
+  # This has no effect if password login is disabled.
+  password_change_allowed: true
+  # Whether email-based password recovery is enabled
+  #
+  # Defaults to `false`.
+  # This has no effect if password login is disabled.
+  password_recovery_enabled: false
+
 
 policy:
   data:
+    hasAdminUsers: false
     admins:
       - system-admin
+    admin_clients:
+      - My_Admin_Client
     # defaults to false
     clientHostMismatch: true
     # defaults to false
     clientNoSsl: true
+    # defaults to false
+    clientMissingUri: false
+    # defaults to false
+    missingContacts: false
     pass:
       minLength: 8
       reqLowCase: true
       reqUpCase: true
       reqNum: true
+
+
+rate_limiting:
+  # Limits how many account recovery attempts are allowed.
+  # These limits can protect against e-mail spam.
+  #
+  # Note: these limit also apply to recovery e-mail re-sends.
+  account_recovery:
+    # Controls how many account recovery attempts are permitted
+    # based on source IP address.
+    ip:
+      burst: 3
+      second: 0.0008
+
+    # Controls how many account recovery attempts are permitted
+    # based on the e-mail address that is being used for recovery.
+    address:
+      burst: 3
+      second: 0.0002
+
+  # Limits how many login attempts are allowed.
+  #
+  # Note: these limit also applies to password checks when a user attempts to
+  # change their own password.
+  login:
+    # Controls how many login attempts are permitted
+    # based on source IP address.
+    # This can protect against brute force login attempts.
+    ip:
+      burst: 3
+      second: 0.05
+
+    # Controls how many login attempts are permitted
+    # based on the account that is being attempted to be logged into.
+    # This can protect against a distributed brute force attack
+    # but should be set high enough to prevent someone's account being
+    # casually locked out.
+    account:
+      burst: 1800
+      second: 0.5
+
+  # Limits how many registrations attempts are allowed,
+  # based on source IP address.
+  # This limit can protect against e-mail spam and against people registering too many accounts.
+  registration:
+    burst: 3
+    second: 0.0008
+
 
 telemetry:
   # disables telemetry, metrics export sentry
@@ -241,12 +325,13 @@ telemetry:
     dsn: https://public@host:port/1
 
 email:
-  enabled: false
   from: '"The almighty auth service" <auth@example.com>'
   reply2: '"No reply" <no-reply@example.com>'
-  # possible values: smtp, sendmail, blackhole (don't send any)
+  # possible values: smtp, sendmail, blackhole (don't send any) default: blackhole
   transport: blackhole
   hostname: localhost
+  # path of your sendmail binary
+  command: "/usr/sbin/sendmail"
   # possinle values: plain, tls, starttls
   mode: starttls
   port: 587
@@ -254,89 +339,58 @@ email:
   password:
 
   # Sample configurations for popular providers can be found in the upstream provider setup guide.
-  # https://matrix-org.github.io/matrix-authentication-service/setup/sso.html#sample-configurations
+  # https://element-hq.github.io/matrix-authentication-service/setup/sso.html
 upstream_oauth2:
-  # remove empty brackets from config.yaml if you're enabling this
   enabled: false
-  # Must be a valid ULID
-  providerId:
-  # The issuer URL, which will be used to discover the provider's configuration.
-  # If discovery is enabled, this *must* exactly match the `issuer` field
-  # advertised in `<issuer>/.well-known/openid-configuration`.
-  issuerUrl: https://example.com/
-  # A human-readable name for the provider,
-  # which will be displayed on the login page
-  humanName: Example
-  # Values supported by the default template: apple, google, facebook, github, gitlabm twitter
-  brand:
-  # The client ID to use to authenticate to the provider
-  clientId:
-  # The client secret to use to authenticate to the provider
-  # This is only used by the `client_secret_post`, `client_secret_basic`
-  # and `client_secret_jwk` authentication methods
-  client_secret:
-  # possilble Values: none, client_secret_basic, client_secret_post, client_secret_jwt, `private_key_jwt` (using the keys defined in the `secrets.keys` section)
-  endpointAuth: client_secret_post
-  # set to true if you use one of the jwt auth methods
-  endpoint:
-    useJwt: false
-  # What signing algorithm to use to sign the authentication request when using the `private_key_jwt` or the `client_secret_jwt` authentication methods
-  endpointAuthSignAlg: RS256
-  # The scopes to request from the provider
-  # In most cases, it should always include `openid` scope
-  scope: "openid email profile"
-  # How the provider configuration and endpoints should be discovered
-  # oidc, insecure, disabled
-  discovery_mode: oidc
-  # Whether PKCE should be used during the authorization code flow.
-  # auto, always, never
-  pkce: auto
-  authorization_endpoint: https://example.com/oauth2/authorize
-  token_endpoint: https://example.com/oauth2/token
-  jwks_uri: https://example.com/oauth2/keys
-
-  # Most of those attributes have two main properties:
-  #   - `action`: what to do with the attribute. Possible values are:
-  #      - `ignore`: ignore the attribute
-  #      - `suggest`: suggest the attribute to the user, but let them opt out
-  #      - `force`: always import the attribute, and don't fail if it's missing
-  #      - `require`: always import the attribute, and fail if it's missing
-  #   - `template`: a Jinja2 template used to generate the value. In this template,
-  #      the `user` variable is available, which contains the user's attributes
-  #      retrieved from the `id_token` given by the upstream provider.
-  #
-  # Each attribute has a default template which follows the well-known OIDC claims.
-  #
-
-  claims_imports:
-    # The subject is an internal identifier used to link the
-    # user's provider identity to local accounts.
-    # By default it uses the `sub` claim as per the OIDC spec,
-    # which should fit most use cases.
-    subject:
-      template: "{{ user.sub }}"
-
-    # The localpart is the local part of the user's Matrix ID.
-    # For example, on the `example.com` server, if the localpart is `alice`,
-    #  the user's Matrix ID will be `@alice:example.com`.
-    localpart:
-      action: force
-      template: "{{ user.preferred_username }}"
-
-    # The display name is the user's display name.
-    displayname:
-      action: suggest
-      template: "{{ user.name }}"
-
-    # An email address to import.
-    email:
-      action: suggest
-      template: "{{ user.email }}"
-      # Whether the email address must be marked as verified.
-      # Possible values are:
-      #  - `import`: mark the email address as verified if the upstream provider
-      #     has marked it as verified, using the `email_verified` claim.
-      #     This is the default.
-      #   - `always`: mark the email address as verified
-      #   - `never`: mark the email address as not verified
-      set_email_verification: always
+  providers: {}
+  #  - id: "01HFS67GJ145HCM9ZASYS9DC3J"
+  #    human_name: GitHub
+  #    brand_name: github
+  #    discovery_mode: disabled
+  #    fetch_userinfo: true
+  #    token_endpoint_auth_method: "client_secret_post"
+  #    client_id: "<client-id>" # TO BE FILLED
+  #    client_secret: "<client-secret>" # TO BE FILLED
+  #    authorization_endpoint: "https://github.com/login/oauth/authorize"
+  #    token_endpoint: "https://github.com/login/oauth/access_token"
+  #    userinfo_endpoint: "https://api.github.com/user"
+  #    scope: "read:user"
+  #    claims_imports:
+  #      subject:
+  #        template: "{{ userinfo_claims.id }}"
+  #      displayname:
+  #        action: suggest
+  #        template: "{{`{{ userinfo_claims.name }}"
+  #      localpart:
+  #        action: ignore
+  #      email:
+  #        action: suggest
+  #        template: "{{ userinfo_claims.email }}"
+  #      account_name:
+  #        template: "@{{ userinfo_claims.login }}"
+  #  - client_id: 01JAYS74TCG3BTWKADN5Q4518C
+  #    client_name: "<Service ID>" # TO BE FILLED
+  #    scope: "openid name email"
+  #    response_mode: "form_post"
+  #    token_endpoint_auth_method: "sign_in_with_apple"
+  #    sign_in_with_apple:
+  #      private_key: |
+  #        # Content of the PEM-encoded private key file, TO BE FILLED
+  #      team_id: "<Team ID>" # TO BE FILLED
+  #      key_id: "<Key ID>" # TO BE FILLED
+  #    claims_imports:
+  #      localpart:
+  #        action: ignore
+  #      displayname:
+  #        action: suggest
+  #        # SiWA passes down the user infos as query parameters in the callback
+  #        # which is available in the extra_callback_parameters variable
+  #        template: |
+  #          {%- set u = extra_callback_parameters["user"] | from_json -%}
+  #          {{- u.name.firstName }} {{ u.name.lastName -}}
+  #      email:
+  #        action: suggest
+  #      account_name:
+  #        template: |
+  #          {%- set u = extra_callback_parameters["user"] | from_json -%}
+  #          {{- u.name.firstName }} {{ u.name.lastName -}}
