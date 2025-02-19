@@ -54,14 +54,14 @@ ingress:
     # kubernetes.io/tls-acme: "true"
     # nginx.ingress.kubernetes.io/use-regex: "true"
   hosts:
-    #- host: auth.example.com
-    #  paths:
-    #    - path: /
-    #      pathType: ImplementationSpecific
-    #- host: synapse.example.com
-    #  paths:
-    #    - path: /_matrix/client/(.*)/(login|logout|refresh)
-    #      pathType: ImplementationSpecific
+    - host: auth.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+    - host: synapse.example.com
+      paths:
+        - path: /_matrix/client/(.*)/(login|logout|refresh)
+          pathType: ImplementationSpecific
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
